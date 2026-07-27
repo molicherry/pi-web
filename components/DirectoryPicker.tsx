@@ -45,7 +45,11 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
   const [pathInput, setPathInput] = useState("");
   const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+const [loading, setLoading] = useState(true);
+const [showCreateInput, setShowCreateInput] = useState(false);
+const [newFolderName, setNewFolderName] = useState("");
+const [creating, setCreating] = useState(false);
+const [createError, setCreateError] = useState<string | null>(null);
 
   const navigateTo = useCallback(async (directory?: string) => {
     setLoading(true);
@@ -63,6 +67,36 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
       setLoading(false);
     }
   }, []);
+
+  const doCreate = useCallback(async () => {
+    const trimmed = newFolderName.trim();
+    if (!trimmed || creating) return;
+    if (trimmed.startsWith(".")) {
+      setCreateError("Folder names cannot start with a dot");
+      return;
+    }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch("/api/cwd/mkdir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent: currentPath, name: trimmed }),
+      });
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json() as { path: string };
+      setShowCreateInput(false);
+      setNewFolderName("");
+      await navigateTo(data.path);
+    } catch (cause) {
+      setCreateError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCreating(false);
+    }
+  }, [newFolderName, creating, currentPath, navigateTo]);
 
   useEffect(() => {
     setPortalTarget(document.body);
@@ -162,13 +196,50 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
               </button>
             ))
-          ) : (
-            <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>No subdirectories</div>
+          ) : showCreateInput ? null : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 8, padding: 20 }}>
+              <div style={{ color: "var(--text-dim)", fontSize: 12 }}>No folders yet</div>
+              <button type="button" onClick={() => setShowCreateInput(true)}
+                style={{ padding: "6px 16px", border: "1px dashed var(--border)", borderRadius: 6, background: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 12 }}>
+                + Create folder
+              </button>
+            </div>
           )}
           {(loadError || error) && <div style={{ padding: "8px", color: "#dc2626", fontSize: 11 }}>{loadError ?? error}</div>}
         </div>
 
-        <div className="directory-picker-footer" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, flexShrink: 0, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+        {showCreateInput && (
+          <>
+            <div style={{ display: "flex", gap: 6, padding: "6px 10px", alignItems: "center", borderTop: "1px solid var(--border)" }}>
+              <FolderIcon />
+              <input
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => { setNewFolderName(e.target.value); setCreateError(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); doCreate(); }
+                  if (e.key === "Escape") { setShowCreateInput(false); setNewFolderName(""); setCreateError(null); }
+                }}
+                placeholder="e.g. my-project"
+                disabled={creating}
+                style={{ minWidth: 0, flex: 1, height: 30, padding: "0 8px", border: `1px solid ${createError ? "#dc2626" : "var(--border)"}`, borderRadius: 5, outline: "none", background: "var(--bg-panel)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
+              />
+              <button onClick={doCreate} disabled={creating || !newFolderName.trim()}
+                style={{ width: 26, height: 26, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", borderRadius: 4, background: "none", color: "var(--accent)", cursor: creating || !newFolderName.trim() ? "default" : "pointer", opacity: creating || !newFolderName.trim() ? 0.4 : 1, fontSize: 14 }}>✓</button>
+              <button onClick={() => { setShowCreateInput(false); setNewFolderName(""); setCreateError(null); }} disabled={creating}
+                style={{ width: 26, height: 26, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--border)", borderRadius: 4, background: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 14 }}>✕</button>
+            </div>
+            {createError && <div style={{ padding: "2px 10px 4px", color: "#dc2626", fontSize: 10, fontFamily: "var(--font-mono)" }}>{createError}</div>}
+          </>
+        )}
+        <div className="directory-picker-footer" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, padding: "10px 18px", borderTop: "1px solid var(--border)" }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+            <button type="button" onClick={() => setShowCreateInput(true)}
+              disabled={busy || showCreateInput}
+              style={{ padding: "6px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--text-muted)", cursor: busy || showCreateInput ? "default" : "pointer", opacity: busy || showCreateInput ? 0.5 : 1, fontSize: 13 }}>
+              + New Folder
+            </button>
+          </div>
           <button className="directory-picker-action" type="button" onClick={onCancel} disabled={busy} style={{ padding: "6px 14px", border: "1px solid var(--border)", borderRadius: 6, background: "none", color: "var(--text-muted)", cursor: busy ? "default" : "pointer", fontSize: 13 }}>Cancel</button>
           <button
             className="directory-picker-action"
